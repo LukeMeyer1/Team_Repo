@@ -1,4 +1,6 @@
-#Cmd to run from root: py -m pytest -q -rs tests/test_compile_all.py
+"""Test purpose: sanity-check that project Python files compile. Uses src/ if
+present and also checks root-level run/run.py if they exist.
+"""
 
 import compileall
 from pathlib import Path
