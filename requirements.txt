@@ -1,0 +1,5 @@
+huggingface_hub[hf_xet]
+transformers
+pytest
+pytest-cov
+pytest-json-report

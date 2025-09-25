@@ -92,8 +92,9 @@ def run(paths=None, pytest_args=None) -> int:
         pytest_args = ["-q", "-rs"]  # quiet + show skip reasons
 
     cmd = [sys.executable, "-m", "pytest", *pytest_args, *paths]
-    print("Running:", " ".join(cmd))
-    return subprocess.run(cmd).returncode
+    # print("Running:", " ".join(cmd))
+    # Suppress pytest output by redirecting stdout and stderr to DEVNULL
+    return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
 
 def main(argv=None) -> int:
     parser = build_parser()

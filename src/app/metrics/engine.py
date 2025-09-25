@@ -13,6 +13,75 @@ import json
 from typing import Dict, Any, List
 from .base import MetricResult, ResourceBundle, Metric
 
+def _extract_model_name(model_url: str) -> str:
+    """
+    Extract model name from HuggingFace URL.
+
+    Args:
+        model_url: Full model URL
+
+    Returns:
+        Model name without organization prefix (e.g., "bert-base-uncased")
+    """
+    if not model_url:
+        return "unknown"
+
+    # Handle various HuggingFace URL formats
+    # https://huggingface.co/google-bert/bert-base-uncased -> bert-base-uncased
+    # https://huggingface.co/bert-base-uncased -> bert-base-uncased
+    # https://huggingface.co/openai/whisper-tiny/tree/main -> whisper-tiny
+    # bert-base-uncased -> bert-base-uncased
+
+    if "huggingface.co" in model_url:
+        # Remove trailing slash and split
+        url_path = model_url.rstrip('/').split('huggingface.co/')[-1]
+        path_parts = url_path.split('/')
+
+        # Handle URLs with /tree/, /blob/, /raw/ etc.
+        if len(path_parts) >= 2:
+            # Check if there's a /tree/, /blob/, etc. in the path
+            if len(path_parts) >= 3 and path_parts[2] in ['tree', 'blob', 'raw', 'resolve']:
+                # Format: org/model/tree/branch -> return model
+                return path_parts[1]
+            else:
+                # Format: org/model -> return model
+                return path_parts[1] if len(path_parts) > 1 else path_parts[0]
+
+    # Direct model name or fallback
+    model_name = model_url.split('/')[-1] if '/' in model_url else model_url
+    return model_name
+
+def _format_size_score(result: MetricResult) -> Dict[str, float]:
+    """
+    Format size score as device compatibility object.
+
+    Args:
+        result: MetricResult from size_score metric
+
+    Returns:
+        Dict with device-specific scores or default structure if unavailable
+    """
+    # If the size metric computed device scores, they should be in the result
+    # For now, create a default structure since the current size metric returns a single score
+    if result.score == 0.0:
+        # No size data available
+        return {
+            "raspberry_pi": 0.0,
+            "jetson_nano": 0.0,
+            "desktop_pc": 0.0,
+            "aws_server": 0.0
+        }
+    else:
+        # Map single score to device categories (this is a simplified mapping)
+        # In a full implementation, the size metric should return device-specific scores
+        score = result.score
+        return {
+            "raspberry_pi": round(max(0.0, score - 0.6), 2),  # Stricter for small devices
+            "jetson_nano": round(max(0.0, score - 0.3), 2),
+            "desktop_pc": round(score, 2),
+            "aws_server": round(score, 2)
+        }
+
 def compute_net_score(results: Dict[str, MetricResult], weights_profile: Dict[str, float]) -> float:
     """
     Compute weighted NetScore from individual metric results.
@@ -48,8 +117,8 @@ def compute_net_score(results: Dict[str, MetricResult], weights_profile: Dict[st
     
     return weighted_sum / weight_sum if weight_sum > 0 else 0.0
 
-def assemble_ndjson_row(bundle: ResourceBundle, results: Dict[str, MetricResult], 
-                        net_score: float, latency_ms: int) -> str:
+def assemble_ndjson_row(bundle: ResourceBundle, results: Dict[str, MetricResult],
+                        net_score: float, latency_ms: int, category: str = "MODEL") -> str:
     """
     Assemble NDJSON output row for a resource bundle.
     
@@ -61,6 +130,7 @@ def assemble_ndjson_row(bundle: ResourceBundle, results: Dict[str, MetricResult]
         results: Dictionary of metric results
         net_score: Computed weighted average score
         latency_ms: Total processing time for this bundle
+        category: Resource category (MODEL, DATASET, CODE)
         
     Returns:
         JSON string in NDJSON format for output
@@ -71,29 +141,59 @@ def assemble_ndjson_row(bundle: ResourceBundle, results: Dict[str, MetricResult]
     - Configurable precision for score rounding
     - Include metric notes in debug mode
     """
-    # Start with required fields per specification
-    ndjson_row = {
-        "URL": bundle.model_url,
-        "NetScore": round(net_score, 3),         # 3 decimal precision per spec
-        "NetScore_Latency": latency_ms
-    }
-    
-    # Add individual metric scores and their latencies
-    # Sorted by metric name for consistent output ordering
-    for metric_name in sorted(results.keys()):
-        result = results[metric_name]
-        ndjson_row[metric_name] = round(result.score, 3)
-        ndjson_row[f"{metric_name}_Latency"] = result.latency_ms
-    
-    # TODO: In debug mode, could also include:
-    # - ndjson_row["_debug_notes"] = {name: result.notes for name, result in results.items()}
-    # - ndjson_row["_dataset_urls"] = bundle.dataset_urls
-    # - ndjson_row["_code_urls"] = bundle.code_urls
-    
-    return json.dumps(ndjson_row)
+    # Extract model name from URL for the expected format
+    model_name = _extract_model_name(bundle.model_url)
 
-def run_bundle(bundle: ResourceBundle, metrics: List[Metric], 
-               weights_profile: Dict[str, float]) -> str:
+    # Use OrderedDict to maintain specific field ordering as per target format
+    from collections import OrderedDict
+    ndjson_row = OrderedDict()
+    
+    # Required fields first
+    ndjson_row["name"] = model_name
+    ndjson_row["category"] = category
+    ndjson_row["net_score"] = round(net_score, 2)
+    ndjson_row["net_score_latency"] = latency_ms
+
+    # Add individual metric scores and their latencies in specific order
+    # Order matches the target format: ramp_up_time, bus_factor, performance_claims, license, size_score, dataset_and_code_score, dataset_quality, code_quality
+    metric_order = [
+        "ramp_up_time",
+        "bus_factor", 
+        "performance_claims",
+        "license",
+        "size_score",
+        "dataset_and_code_score",
+        "dataset_quality",
+        "code_quality"
+    ]
+    
+    for metric_name in metric_order:
+        if metric_name in results:
+            result = results[metric_name]
+
+            # Handle size_score specially - it should be an object with device scores
+            if metric_name == "size_score":
+                ndjson_row[metric_name] = _format_size_score(result)
+            else:
+                ndjson_row[metric_name] = round(result.score, 2)  # 2 decimal precision
+
+            ndjson_row[f"{metric_name}_latency"] = result.latency_ms
+    
+    # Add any remaining metrics not in the predefined order (for completeness)
+    for metric_name in sorted(results.keys()):
+        if metric_name not in metric_order:
+            result = results[metric_name]
+            if metric_name == "size_score":
+                ndjson_row[metric_name] = _format_size_score(result)
+            else:
+                ndjson_row[metric_name] = round(result.score, 2)
+            ndjson_row[f"{metric_name}_latency"] = result.latency_ms
+    
+    # Use separators to remove spaces after colons and commas (compact JSON)
+    return json.dumps(ndjson_row, separators=(',', ':'))
+
+def run_bundle(bundle: ResourceBundle, metrics: List[Metric],
+               weights_profile: Dict[str, float], category: str = "MODEL") -> str:
     """
     Execute all metrics for a resource bundle and return NDJSON result.
     
@@ -106,6 +206,7 @@ def run_bundle(bundle: ResourceBundle, metrics: List[Metric],
         bundle: Resource bundle to evaluate (model + datasets + code)
         metrics: List of metric instances to execute
         weights_profile: Weight configuration for NetScore calculation
+        category: Resource category (MODEL, DATASET, CODE)
         
     Returns:
         NDJSON string ready for output
@@ -153,4 +254,4 @@ def run_bundle(bundle: ResourceBundle, metrics: List[Metric],
     # Total processing time for this bundle
     total_latency_ms = int((perf_counter_ns() - t0) / 1_000_000)
     
-    return assemble_ndjson_row(bundle, results, net_score, total_latency_ms)
+    return assemble_ndjson_row(bundle, results, net_score, total_latency_ms, category)

@@ -66,6 +66,7 @@ class ResourceBundle:
     model_url: str           # Primary model URL from Hugging Face
     dataset_urls: List[str]  # Associated datasets for quality evaluation
     code_urls: List[str]     # Related repositories for code quality analysis
+    model_id: Optional[str] = None            # Model id for metric uses
 
 class Metric(Protocol):
     """

@@ -1,9 +1,47 @@
 #!/usr/bin/env python3
-import argparse, sys
+import argparse, sys, os
 from pathlib import Path
 import Orchestrator
 
+def validate_environment_variables():
+    """Validate required environment variables at startup."""
+    # Validate GitHub token
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token or len(github_token.strip()) == 0:
+        sys.exit(1)
+
+    # Check if GitHub token is valid by making a simple API call
+    try:
+        import requests
+        response = requests.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"token {github_token}"},
+            timeout=10
+        )
+        if response.status_code != 200:
+            sys.exit(1)
+    except requests.exceptions.RequestException as e:
+        sys.exit(1)
+    except ImportError:
+        # If requests is not available, skip validation but warn
+        pass
+
+    # Validate log file path only if LOG_FILE is explicitly set
+    log_file = os.getenv("LOG_FILE")
+    if log_file:
+        try:
+            log_path = Path(log_file)
+            # Create parent directories if they don't exist
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # Test if we can write to the log file location
+            log_path.touch(exist_ok=True)
+        except (OSError, PermissionError) as e:
+            sys.exit(1)
+
 def main(argv=None) -> int:
+    # Validate environment variables at startup
+    validate_environment_variables()
+
     if argv is None:
         argv = sys.argv[1:]
 

@@ -11,6 +11,31 @@ run -> Orchestrator.py  -> Installer.py
                         -> Tester.py
                         -> Url_Parser.py    
 
+## Logging 
+This project includes a configurable logging system to help track errors, warnings, and debug messages. Logging is controlled entirely through environment variables, so no code changes are needed to adjust the behavior.
+
+### Configuration
+
+Two environment variables control logging:
+
+   LOG_FILE: 
+        Path to the file where logs will be written.
+
+        Example: /tmp/myapp.log (Linux/macOS) or C:\temp\myapp.log (Windows)
+
+        Default: app.log in the project root if not set
+
+   LOG_LEVEL: 
+        Verbosity of the logs.
+
+            0 → Silent (no logs written)
+
+            1 → Informational messages (INFO, WARNING, ERROR, CRITICAL)
+
+            2 → Debug messages (DEBUG and above)
+
+        Default: 0 (silent)
+
 ## Metrics System Implementation
 
 ```
