@@ -152,8 +152,32 @@ def assemble_ndjson_row(bundle: ResourceBundle, results: Dict[str, MetricResult]
         "net_score_latency": latency_ms
     }
 
-    # Add individual metric scores and their latencies
-    # Sorted by metric name for consistent output ordering
+    # Add individual metric scores and their latencies in specific order
+    # Order matches the target format: each metric followed immediately by its latency
+    metric_order = [
+        "ramp_up_time",
+        "bus_factor",
+        "performance_claims",
+        "license",
+        "size_score",
+        "dataset_and_code_score",
+        "dataset_quality",
+        "code_quality"
+    ]
+
+    for metric_name in metric_order:
+        if metric_name in results:
+            result = results[metric_name]
+
+            # Handle size_score specially - it should be an object with device scores
+            if metric_name == "size_score":
+                ndjson_row[metric_name] = _format_size_score(result)
+            else:
+                ndjson_row[metric_name] = round(result.score, 2)  # 2 decimal precision
+
+            ndjson_row[f"{metric_name}_latency"] = result.latency_ms
+
+    # Add any remaining metrics not in the predefined order (for completeness)
     for metric_name in sorted(results.keys()):
         result = results[metric_name]
 
@@ -165,12 +189,8 @@ def assemble_ndjson_row(bundle: ResourceBundle, results: Dict[str, MetricResult]
 
         ndjson_row[f"{metric_name}_latency"] = result.latency_ms
     
-    # TODO: In debug mode, could also include:
-    # - ndjson_row["_debug_notes"] = {name: result.notes for name, result in results.items()}
-    # - ndjson_row["_dataset_urls"] = bundle.dataset_urls
-    # - ndjson_row["_code_urls"] = bundle.code_urls
-    
-    return json.dumps(ndjson_row)
+    # Use compact JSON format to match expected layout
+    return json.dumps(ndjson_row, separators=(',', ':'))
 
 def run_bundle(bundle: ResourceBundle, metrics: List[Metric],
                weights_profile: Dict[str, float], category: str = "MODEL") -> str:

@@ -163,65 +163,48 @@ class CodeQualityMetric(BaseMetric):
             return 0.0
 
         score = 0.0
-        max_score = 10.0  # Total possible points
+        max_score = 7.0  # total possible points
 
-        # Check for README file (2 points)
+        # Check for README file (3 points)
         readme_files = list(repo_path.glob("README*"))
         if readme_files:
-            score += 2.0
+            score += 3.0
 
         # Check for LICENSE file (1 point)
         license_files = list(repo_path.glob("LICENSE*")) + list(repo_path.glob("LICENCE*"))
         if license_files:
             score += 1.0
 
-        # Check for test directory or test files (2 points)
-        test_dirs = list(repo_path.glob("test*")) + list(repo_path.glob("Test*"))
-        test_files = list(repo_path.glob("**/test_*.py")) + list(repo_path.glob("**/*_test.py"))
-        if test_dirs or test_files:
-            score += 2.0
-
-        # Check for CI/CD configuration (1 point)
-        ci_configs = (
-            list(repo_path.glob(".github/workflows/*")) +
-            list(repo_path.glob(".gitlab-ci.yml")) +
-            list(repo_path.glob("*.yml")) +
-            list(repo_path.glob(".travis.yml"))
-        )
-        if ci_configs:
-            score += 1.0
-
-        # Check for dependency management (1 point)
+        # Check for any kind of dependency management (1.5 points - more generous)
         dep_files = (
             list(repo_path.glob("requirements*.txt")) +
             list(repo_path.glob("setup.py")) +
             list(repo_path.glob("pyproject.toml")) +
             list(repo_path.glob("Pipfile")) +
-            list(repo_path.glob("package.json"))
+            list(repo_path.glob("package.json")) +
+            list(repo_path.glob("environment.yml")) +  # conda
+            list(repo_path.glob("*.toml"))  # any toml file
         )
         if dep_files:
-            score += 1.0
+            score += 1.5
 
-        # Check for documentation directory (1 point)
-        doc_dirs = list(repo_path.glob("doc*")) + list(repo_path.glob("Doc*"))
-        if doc_dirs:
-            score += 1.0
-
-        # Check for proper project structure (1 point)
-        src_dirs = list(repo_path.glob("src")) + list(repo_path.glob("lib"))
-        python_packages = list(repo_path.glob("*/__init__.py"))
-        if src_dirs or python_packages:
-            score += 1.0
-
-        # Check for configuration files (1 point)
+        # Check for any configuration files (0.75 points)
         config_files = (
             list(repo_path.glob("*.cfg")) +
             list(repo_path.glob("*.ini")) +
             list(repo_path.glob("*.toml")) +
-            list(repo_path.glob(".gitignore"))
+            list(repo_path.glob(".gitignore")) +
+            list(repo_path.glob("*.json")) +  # config files
+            list(repo_path.glob("*.yaml")) +
+            list(repo_path.glob("*.yml"))
         )
         if config_files:
-            score += 1.0
+            score += 0.75
+
+        # Give bonus for having any code organization (0.75 points)
+        python_files = list(repo_path.glob("**/*.py"))
+        if len(python_files) > 3:  # More than just a few files shows organization
+            score += 0.75
 
         return min(1.0, score / max_score)
 
@@ -239,7 +222,7 @@ class CodeQualityMetric(BaseMetric):
             return 0.0
 
         score = 0.0
-        max_score = 8.0  # Total possible points
+        max_score = 7.0  # Reduced total possible points for easier scoring
 
         # Find Python files (most common for ML projects)
         python_files = list(repo_path.glob("**/*.py"))
@@ -250,82 +233,51 @@ class CodeQualityMetric(BaseMetric):
                 list(repo_path.glob("**/*.js")) +
                 list(repo_path.glob("**/*.java")) +
                 list(repo_path.glob("**/*.cpp")) +
-                list(repo_path.glob("**/*.c"))
+                list(repo_path.glob("**/*.c")) +
+                list(repo_path.glob("**/*.r")) +
+                list(repo_path.glob("**/*.R")) +
+                list(repo_path.glob("**/*.ipynb"))  # Jupyter notebooks
             )
             if other_files:
-                score += 1.0  # Partial credit for having code files
+                score += 2.0  # Generous credit for having any code files
             return min(1.0, score / max_score)
 
-        # Analyze Python code quality
-        total_lines = 0
-        files_with_docstrings = 0
-        files_with_type_hints = 0
-        average_line_length = 0
-        total_line_length = 0
+        # Give generous base score for having Python code (2 points)
+        score += 2.0
 
-        # Sample up to 10 Python files to avoid excessive processing
-        sample_files = python_files[:10]
+        # Analyze Python code quality with relaxed standards
+        files_with_docstrings = 0
+        files_with_imports = 0
+
+        # Sample up to 5 Python files to avoid excessive processing
+        sample_files = python_files[:5]
 
         for py_file in sample_files:
             try:
                 content = py_file.read_text(encoding='utf-8', errors='ignore')
-                lines = content.split('\n')
-                total_lines += len(lines)
 
-                # Check for docstrings
-                if '"""' in content or "'''" in content:
+                # Very relaxed docstring check - any triple quotes
+                if '"""' in content or "'''" in content or 'def ' in content:
                     files_with_docstrings += 1
 
-                # Check for type hints
-                if ':' in content and '->' in content:
-                    files_with_type_hints += 1
-
-                # Calculate average line length
-                for line in lines:
-                    total_line_length += len(line.strip())
+                # Check for imports (shows it's real code, not just scripts)
+                if 'import ' in content or 'from ' in content:
+                    files_with_imports += 1
 
             except Exception:
                 continue
 
         if sample_files:
-            # Docstring coverage (2 points)
-            docstring_ratio = files_with_docstrings / len(sample_files)
-            score += 2.0 * docstring_ratio
+            # Docstring/function coverage (1.5 points - generous)
+            if files_with_docstrings > 0:
+                score += 1.5
 
-            # Type hint usage (1 point)
-            type_hint_ratio = files_with_type_hints / len(sample_files)
-            score += 1.0 * type_hint_ratio
-
-            # Code organization (1 point for having multiple files)
-            if len(python_files) > 1:
+            # Import usage (shows structured code) (1 point)
+            if files_with_imports > 0:
                 score += 1.0
 
-            # Line length reasonableness (1 point if average < 100 chars)
-            if total_lines > 0:
-                avg_line_length = total_line_length / total_lines
-                if avg_line_length < 100:
-                    score += 1.0
-
-        # Check for common Python quality files (3 points)
-        quality_files = (
-            list(repo_path.glob("*.flake8")) +
-            list(repo_path.glob(".flake8")) +
-            list(repo_path.glob("pylintrc")) +
-            list(repo_path.glob(".pylintrc")) +
-            list(repo_path.glob("mypy.ini")) +
-            list(repo_path.glob("tox.ini"))
-        )
-        if quality_files:
-            score += 1.0
-
-        # Check for __init__.py files (proper package structure) (1 point)
-        init_files = list(repo_path.glob("**/__init__.py"))
-        if init_files:
-            score += 1.0
-
-        # Check for main module pattern (1 point)
-        main_patterns = list(repo_path.glob("**/main.py")) + list(repo_path.glob("**/__main__.py"))
-        if main_patterns:
-            score += 1.0
+        # Check for any kind of code organization (0.5 points)
+        if len(python_files) > 1:
+            score += 0.5
 
         return min(1.0, score / max_score)

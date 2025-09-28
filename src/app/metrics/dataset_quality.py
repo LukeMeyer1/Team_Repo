@@ -1,4 +1,6 @@
 import re
+import sys
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -6,11 +8,21 @@ from app.metrics.base import ResourceBundle
 from app.metrics.registry import register
 from app.metrics.base_metric import BaseMetric
 
+# Import logger from project root
+_root_path = str(Path(__file__).parent.parent.parent.parent)
+if _root_path not in sys.path:
+    sys.path.insert(0, _root_path)
+
+from Logger import get_logger
+logger = get_logger(__name__)
+
 # Import HuggingFace client with error handling
 try:
     from app.integrations.huggingface_client import hf_client
+    logger.info("HuggingFace client successfully imported")
 except ImportError:
     hf_client = None
+    logger.warning("HuggingFace client not available - dataset quality analysis will be limited")
 
 @register("dataset_quality")
 class DatasetQualityMetric(BaseMetric):
@@ -55,32 +67,47 @@ class DatasetQualityMetric(BaseMetric):
             Score from 0-1 where 1 = high-quality, well-documented, widely-used datasets
         """
         if not resource.dataset_urls:
+            logger.debug(f"No dataset URLs provided for model {resource.model_url}")
             return 0.0
 
         if not hf_client:
+            logger.error("HuggingFace client unavailable - returning minimal score")
             return 0.1  # Minimal score if HF client unavailable
+
+        logger.info(f"Starting dataset quality analysis for {len(resource.dataset_urls)} dataset(s) "
+                   f"from model {resource.model_url}")
 
         total_score = 0.0
         analyzed_datasets = 0
         dataset_details = []
+        failed_datasets = 0
 
         # Analyze each dataset (limit to first 5 to avoid excessive processing)
         for dataset_url in resource.dataset_urls[:5]:
             try:
                 dataset_id = self._extract_dataset_id(dataset_url)
                 if not dataset_id:
+                    logger.warning(f"Could not extract dataset ID from URL: {dataset_url}")
                     continue
 
+                logger.debug(f"Analyzing dataset: {dataset_id}")
                 dataset_score, details = self._analyze_single_dataset(dataset_id)
                 if dataset_score is not None:
                     total_score += dataset_score
                     analyzed_datasets += 1
                     dataset_details.append(details)
+                    logger.debug(f"Dataset {dataset_id} scored {dataset_score:.2f}")
+                else:
+                    failed_datasets += 1
 
-            except Exception:
+            except Exception as e:
+                failed_datasets += 1
+                logger.warning(f"Failed to analyze dataset {dataset_url}: {str(e)}")
                 continue  # Skip failed datasets
 
         if analyzed_datasets == 0:
+            logger.warning(f"No datasets could be analyzed for model {resource.model_url} "
+                         f"({failed_datasets} failed, {len(resource.dataset_urls)} total)")
             return 0.0
 
         # Average score across analyzed datasets
@@ -88,6 +115,8 @@ class DatasetQualityMetric(BaseMetric):
 
         # Bonus for dataset diversity (multiple quality datasets)
         diversity_bonus = min(0.1, (analyzed_datasets - 1) * 0.05)
+
+        final_score = min(1.0, average_score + diversity_bonus)
 
         # Store analysis details for notes
         self._analysis_details = {
@@ -98,7 +127,15 @@ class DatasetQualityMetric(BaseMetric):
             'diversity_bonus': diversity_bonus
         }
 
-        return min(1.0, average_score + diversity_bonus)
+        logger.info(f"Dataset quality analysis complete for {resource.model_url}: "
+                   f"{analyzed_datasets}/{len(resource.dataset_urls)} datasets analyzed, "
+                   f"final score: {final_score:.2f} (avg: {average_score:.2f}, "
+                   f"diversity bonus: {diversity_bonus:.2f})")
+
+        if failed_datasets > 0:
+            logger.warning(f"{failed_datasets} datasets failed analysis for {resource.model_url}")
+
+        return final_score
 
     def _get_computation_notes(self, resource: ResourceBundle) -> str:
         if not resource.dataset_urls:
@@ -177,15 +214,20 @@ class DatasetQualityMetric(BaseMetric):
         """
         try:
             # Get dataset info and metadata
+            logger.debug(f"Fetching dataset info for {dataset_id}")
             info_result = hf_client.get_dataset_info(dataset_id)
             if 'error' in info_result:
+                logger.warning(f"Failed to get dataset info for {dataset_id}: {info_result.get('error')}")
                 return None, {}
 
             card_data = hf_client.get_dataset_card_data(dataset_id)
             if 'error' in card_data:
+                logger.debug(f"No card data available for {dataset_id}, using empty data")
                 card_data = {}
 
             readme_content = hf_client.get_dataset_readme(dataset_id)
+            if not readme_content:
+                logger.debug(f"No README content available for {dataset_id}")
 
             # Extract basic metrics
             dataset_info = info_result.get('dataset_info')
@@ -220,9 +262,13 @@ class DatasetQualityMetric(BaseMetric):
                 'licensing_score': licensing_score
             }
 
+            logger.debug(f"Dataset {dataset_id} analysis complete: score={overall_score:.2f}, "
+                        f"downloads={downloads}, likes={likes}")
+
             return overall_score, details
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Unexpected error analyzing dataset {dataset_id}: {str(e)}")
             return None, {}
 
     def _calculate_popularity_score(self, downloads: int, likes: int) -> float:
@@ -236,22 +282,25 @@ class DatasetQualityMetric(BaseMetric):
         Returns:
             Score from 0-1 based on popularity metrics
         """
-        # Normalize download counts (logarithmic scale)
+        # Normalize download counts with more reasonable thresholds
         if downloads > 0:
-            # Popular datasets: 100K+ downloads = 1.0, 10K+ = 0.8, 1K+ = 0.6
-            download_score = min(1.0, (downloads / 100000) ** 0.5)
+            # Use logarithmic scaling with lower thresholds:
+            # 10K+ downloads = 1.0, 1K+ = 0.7, 100+ = 0.4, 10+ = 0.2
+            import math
+            download_score = min(1.0, math.log10(downloads + 1) / 4.0)  # log10(10000) = 4
         else:
             download_score = 0.0
 
-        # Normalize like counts
+        # Normalize like counts with more reasonable thresholds
         if likes > 0:
-            # Popular datasets: 1000+ likes = 1.0, 100+ = 0.8, 10+ = 0.6
-            like_score = min(1.0, (likes / 1000) ** 0.5)
+            # 100+ likes = 1.0, 10+ = 0.7, 5+ = 0.5, 1+ = 0.3
+            import math
+            like_score = min(1.0, math.log10(likes + 1) / 2.0)  # log10(100) = 2
         else:
             like_score = 0.0
 
         # Weighted combination (downloads more important than likes)
-        return download_score * 0.8 + like_score * 0.2
+        return download_score * 0.7 + like_score * 0.3
 
     def _calculate_documentation_score(self, card_data: Dict, readme_content: Optional[str]) -> float:
         """
@@ -266,29 +315,32 @@ class DatasetQualityMetric(BaseMetric):
         """
         score = 0.0
 
-        # Check for README content
+        # Check for README content - more generous base score
         if readme_content:
-            score += 0.4
+            score += 0.5  # Increased from 0.4
 
-            # Bonus for comprehensive README (length, sections)
-            if len(readme_content) > 1000:
-                score += 0.1
+            # Bonus for any meaningful content (lowered threshold)
+            if len(readme_content) > 200:  # Reduced from 1000
+                score += 0.15
 
-            # Check for key documentation sections
+            # Check for key documentation sections (more flexible matching)
             readme_lower = readme_content.lower()
             key_sections = ['dataset', 'description', 'usage', 'citation', 'license']
             found_sections = sum(1 for section in key_sections if section in readme_lower)
-            score += (found_sections / len(key_sections)) * 0.2
+            score += (found_sections / len(key_sections)) * 0.15  # Reduced impact
 
-        # Check for structured metadata
-        if card_data.get('task_categories'):
-            score += 0.1
-        if card_data.get('language'):
-            score += 0.1
-        if card_data.get('size_categories'):
-            score += 0.1
-        if card_data.get('source_datasets'):
-            score += 0.1
+        # Check for structured metadata - more generous scoring
+        metadata_fields = [
+            card_data.get('task_categories'),
+            card_data.get('language'),
+            card_data.get('size_categories'),
+            card_data.get('source_datasets')
+        ]
+
+        # Award 0.05 for each metadata field present (up to 0.2 total)
+        for field in metadata_fields:
+            if field:
+                score += 0.05
 
         return min(1.0, score)
 
@@ -303,27 +355,29 @@ class DatasetQualityMetric(BaseMetric):
             Score from 0-1 based on metadata completeness
         """
         score = 0.0
-        max_score = 8.0
+        max_score = 6.0  # Reduced from 8.0 to be more lenient
 
-        # Check for various metadata fields
+        # Core metadata fields (weighted more heavily)
         if card_data.get('task_categories'):
-            score += 1.0
-        if card_data.get('task_ids'):
-            score += 1.0
+            score += 1.5  # Most important
         if card_data.get('language'):
-            score += 1.0
-        if card_data.get('multilinguality'):
-            score += 1.0
+            score += 1.5  # Very important
         if card_data.get('size_categories'):
-            score += 1.0
-        if card_data.get('source_datasets'):
             score += 1.0
         if card_data.get('tags'):
             score += 1.0
-        if card_data.get('created_at') or card_data.get('last_modified'):
-            score += 1.0
 
-        return score / max_score
+        # Optional metadata fields (lighter weight)
+        if card_data.get('task_ids'):
+            score += 0.5
+        if card_data.get('multilinguality'):
+            score += 0.25
+        if card_data.get('source_datasets'):
+            score += 0.25
+        if card_data.get('created_at') or card_data.get('last_modified'):
+            score += 0.5
+
+        return min(1.0, score / max_score)
 
     def _calculate_diversity_score(self, card_data: Dict) -> float:
         """
@@ -337,31 +391,31 @@ class DatasetQualityMetric(BaseMetric):
         """
         score = 0.0
 
-        # Language diversity
+        # Language diversity - be more generous
         languages = card_data.get('language', [])
         if isinstance(languages, list) and len(languages) > 1:
-            score += 0.3  # Multilingual datasets
+            score += 0.4  # Multilingual datasets
         elif languages:
-            score += 0.1  # Single language specified
+            score += 0.2  # Single language specified (increased from 0.1)
 
-        # Size categories (larger datasets generally better)
+        # Size categories - more generous scoring
         size_categories = card_data.get('size_categories', [])
-        if isinstance(size_categories, list):
-            # Check for large dataset indicators
+        if isinstance(size_categories, list) and size_categories:
+            # Any size category specified gets decent score
+            score += 0.3
+            # Bonus for larger datasets
             large_indicators = ['100K<n<1M', '1M<n<10M', '10M<n<100M', '100M<n<1B', 'n>1B']
             if any(indicator in size_categories for indicator in large_indicators):
-                score += 0.4
-            elif size_categories:
-                score += 0.2
+                score += 0.2  # Bonus for large datasets
 
-        # Task diversity
+        # Task diversity - more generous
         task_categories = card_data.get('task_categories', [])
         if isinstance(task_categories, list) and len(task_categories) > 1:
-            score += 0.2  # Multi-task datasets
+            score += 0.3  # Multi-task datasets
         elif task_categories:
-            score += 0.1
+            score += 0.2  # Single task specified (increased from 0.1)
 
-        # Source diversity
+        # Source diversity - keep same
         source_datasets = card_data.get('source_datasets', [])
         if isinstance(source_datasets, list) and len(source_datasets) > 1:
             score += 0.1  # Derived from multiple sources
@@ -387,9 +441,9 @@ class DatasetQualityMetric(BaseMetric):
             if any(open_lic in str(license_info).lower() for open_lic in open_licenses):
                 score += 0.8
             else:
-                score += 0.4  # Has license but may be restrictive
+                score += 0.5  # Has license but may be restrictive (increased from 0.4)
         else:
-            score += 0.1  # No license information (concerning)
+            score += 0.2  # No license information (increased from 0.1 to be less punitive)
 
         # Bonus for ethics considerations
         tags = card_data.get('tags', [])

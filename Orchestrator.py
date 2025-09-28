@@ -146,7 +146,7 @@ def process_url(url: str) -> int:
         return 1
 
 
-def run_metrics(model_url: str, dataset_urls: List[str] = None, code_urls: List[str] = None, weights: Dict[str, float] = None, use_cache: bool = True, category: str = "MODEL") -> str:
+def run_metrics(model_url: str, dataset_urls: List[str] = None, code_urls: List[str] = None, weights: Dict[str, float] = None, use_cache: bool = False, category: str = "MODEL") -> str:
     """
     Run the metrics system on a given model with optional dataset and code URLs.
 
@@ -205,11 +205,39 @@ def run_metrics(model_url: str, dataset_urls: List[str] = None, code_urls: List[
         # Extract model_id from URL for metrics that need it
         model_id = model_url.split("/")[-1] if model_url else ""
 
+        # Enhance URLs with LLM-based metadata extraction if lists are empty
+        enhanced_dataset_urls = dataset_urls[:]
+        enhanced_code_urls = code_urls[:]
+
+        if not enhanced_dataset_urls or not enhanced_code_urls:
+            try:
+                from app.metrics.llm_metadata_extractor import metadata_extractor
+                extracted_metadata = metadata_extractor.extract_metadata(model_id)
+
+                # Add discovered URLs if we don't already have them
+                if not enhanced_dataset_urls and extracted_metadata.dataset_urls:
+                    enhanced_dataset_urls.extend(extracted_metadata.dataset_urls)
+
+                if not enhanced_code_urls and extracted_metadata.code_urls:
+                    enhanced_code_urls.extend(extracted_metadata.code_urls)
+
+                # Also try to infer dataset URLs from dataset names
+                if not enhanced_dataset_urls and extracted_metadata.training_datasets:
+                    for dataset_name in extracted_metadata.training_datasets:
+                        # Convert common dataset names to HuggingFace URLs
+                        if '/' not in dataset_name:  # Simple name, not a path
+                            hf_url = f"https://huggingface.co/datasets/{dataset_name.lower()}"
+                            enhanced_dataset_urls.append(hf_url)
+
+            except Exception:
+                # If metadata extraction fails, continue with original URLs
+                pass
+
         # Create resource bundle
         resource_bundle = ResourceBundle(
             model_url=model_url,
-            dataset_urls=dataset_urls,
-            code_urls=code_urls,
+            dataset_urls=enhanced_dataset_urls,
+            code_urls=enhanced_code_urls,
             model_id=model_id
         )
 
@@ -238,5 +266,5 @@ def run_metrics(model_url: str, dataset_urls: List[str] = None, code_urls: List[
             "NetScore": 0.0,
             "NetScore_Latency": 0
         }
-        return json.dumps(error_result)
+        return json.dumps(error_result, separators=(',', ':'))
 

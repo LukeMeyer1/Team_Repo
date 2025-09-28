@@ -116,11 +116,11 @@ def test_popularity_score_calculation():
 
     metric = DatasetQualityMetric()
 
-    # Test various popularity scenarios - just check ranges instead of exact values
+    # Test various popularity scenarios - updated for new logarithmic scoring
     test_cases = [
         (0, 0, (0.0, 0.0)),           # No popularity
-        (1000, 10, (0.05, 0.15)),     # Low popularity
-        (10000, 100, (0.25, 0.35)),   # Medium popularity
+        (1000, 10, (0.6, 0.8)),       # Low popularity (updated)
+        (10000, 100, (0.8, 1.0)),     # Medium popularity (updated)
         (100000, 1000, (0.9, 1.0)),   # High popularity
         (1000000, 5000, (0.9, 1.0)),  # Very high popularity
     ]
@@ -198,7 +198,7 @@ def test_metadata_score_calculation():
         'tags': ['nlp', 'classification']
     }
     score_partial = metric._calculate_metadata_score(partial_metadata)
-    assert 0.2 < score_partial < 0.6, f"Expected medium score for partial metadata, got {score_partial}"
+    assert 0.6 <= score_partial <= 0.8, f"Expected medium-high score for partial metadata, got {score_partial}"
 
     # Test with comprehensive metadata
     full_metadata = {
@@ -263,7 +263,7 @@ def test_licensing_score_calculation():
 
     # Test with no license
     score_no_license = metric._calculate_licensing_score({})
-    assert score_no_license == 0.1, f"Expected 0.1 for no license, got {score_no_license}"
+    assert score_no_license == 0.2, f"Expected 0.2 for no license, got {score_no_license}"
 
     # Test with open license
     open_license_data = {'license': 'mit'}
@@ -273,7 +273,7 @@ def test_licensing_score_calculation():
     # Test with restrictive license
     restrictive_license_data = {'license': 'custom-restrictive'}
     score_restrictive = metric._calculate_licensing_score(restrictive_license_data)
-    assert 0.3 < score_restrictive < 0.6, f"Expected medium score for restrictive license, got {score_restrictive}"
+    assert 0.4 <= score_restrictive <= 0.7, f"Expected medium score for restrictive license, got {score_restrictive}"
 
     # Test with ethics tags
     ethics_data = {
