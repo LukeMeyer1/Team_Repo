@@ -1,7 +1,6 @@
 import time
 import sys
 import os
-import Url_Parser
 import Installer
 import Tester
 from pathlib import Path
@@ -140,22 +139,85 @@ def process_url_group(url_group: str, dataset_tracker=None) -> int:
             print("Error: Model URL (third field) is required", file=sys.stderr)
             return 1
 
-        # Handle dataset tracking and inference
+        # Clean up model URL (remove /tree/main etc.)
+        model_url = model_url.rstrip('/').split('/tree/')[0].split('/blob/')[0]
+
+        # Extract model_id for LLM inference
+        model_id = None
+        if model_url and "huggingface.co" in model_url:
+            parts = model_url.rstrip("/").split("/")
+            if len(parts) >= 2:
+                model_id = "/".join(parts[-2:])  # Get org/model
+
+        # Use LLM metadata extractor to infer missing URLs
+        inferred_dataset_urls = []
+        inferred_code_urls = []
+
+        if model_id and (not dataset_url or not code_url):
+            try:
+                # Import LLM metadata extractor
+                ROOT = Path(__file__).resolve().parent
+                SRC = ROOT / "src"
+                if str(SRC) not in sys.path:
+                    sys.path.insert(0, str(SRC))
+
+                from app.metrics.llm_metadata_extractor import metadata_extractor
+
+                # Extract metadata to infer missing URLs
+                extracted_metadata = metadata_extractor.extract_metadata(model_id)
+
+                if not dataset_url and extracted_metadata:
+                    # Try dataset URLs first, then training datasets
+                    inferred_dataset_urls = extracted_metadata.dataset_urls or []
+                    if not inferred_dataset_urls and extracted_metadata.training_datasets:
+                        # Convert dataset names to URLs if possible
+                        known_mappings = {
+                            'librispeech': 'https://huggingface.co/datasets/librispeech_asr',
+                            'common_voice': 'https://huggingface.co/datasets/common_voice',
+                            'squad': 'https://huggingface.co/datasets/squad',
+                            'glue': 'https://huggingface.co/datasets/glue',
+                        }
+                        for dataset_name in extracted_metadata.training_datasets:
+                            mapping_key = dataset_name.lower().replace('-', '_')
+                            if mapping_key in known_mappings:
+                                inferred_dataset_urls.append(known_mappings[mapping_key])
+
+                if not code_url and extracted_metadata:
+                    inferred_code_urls = extracted_metadata.code_urls or []
+
+                # print(f"LLM inference for {model_id}: datasets={inferred_dataset_urls}, code={inferred_code_urls}", file=sys.stderr)
+
+            except Exception as e:
+                pass  # Silently continue if LLM inference fails
+
+        # Handle dataset URLs - explicit or inferred
         if dataset_url:
             # Dataset explicitly provided - add to tracker
             if dataset_tracker:
                 dataset_tracker.add_dataset(dataset_url)
             dataset_urls = [dataset_url]
+        elif inferred_dataset_urls:
+            # Use LLM-inferred dataset URLs
+            dataset_urls = inferred_dataset_urls
+            if dataset_tracker:
+                for url in dataset_urls:
+                    dataset_tracker.add_dataset(url)
         else:
-            # Dataset missing - try to infer from model README
+            # Fallback to old dataset tracker inference
             if dataset_tracker:
                 inferred_dataset = dataset_tracker.infer_dataset(model_url)
                 dataset_urls = [inferred_dataset] if inferred_dataset else []
             else:
                 dataset_urls = []
 
-        # Prepare code URL list
-        code_urls = [code_url] if code_url else []
+        # Handle code URLs - explicit or inferred
+        if code_url:
+            code_urls = [code_url]
+        elif inferred_code_urls:
+            # Use LLM-inferred code URLs
+            code_urls = inferred_code_urls
+        else:
+            code_urls = []
 
         # Run grouped evaluation - all entries in CSV are model evaluations
         result = run_metrics(
@@ -177,6 +239,7 @@ def process_url(url: str) -> int:
     """
     Run metrics evaluation for a single URL.
     Treats all single URLs as model URLs for evaluation.
+    Uses LLM inference to discover missing dataset/code URLs.
 
     Args:
         url: Single URL to evaluate as a model
@@ -185,7 +248,60 @@ def process_url(url: str) -> int:
         0 on success, non-zero on error
     """
     try:
-        result = run_metrics(model_url=url)
+        # Clean up model URL (remove /tree/main etc.)
+        model_url = url.rstrip('/').split('/tree/')[0].split('/blob/')[0]
+
+        # Extract model_id for LLM inference
+        model_id = None
+        if model_url and "huggingface.co" in model_url:
+            parts = model_url.rstrip("/").split("/")
+            if len(parts) >= 2:
+                model_id = "/".join(parts[-2:])  # Get org/model
+
+        # Use LLM metadata extractor to infer dataset and code URLs
+        dataset_urls = []
+        code_urls = []
+
+        if model_id:
+            try:
+                # Import LLM metadata extractor
+                ROOT = Path(__file__).resolve().parent
+                SRC = ROOT / "src"
+                if str(SRC) not in sys.path:
+                    sys.path.insert(0, str(SRC))
+
+                from app.metrics.llm_metadata_extractor import metadata_extractor
+
+                # Extract metadata to infer URLs
+                extracted_metadata = metadata_extractor.extract_metadata(model_id)
+
+                if extracted_metadata:
+                    # Get dataset URLs
+                    dataset_urls = extracted_metadata.dataset_urls or []
+                    if not dataset_urls and extracted_metadata.training_datasets:
+                        # Convert dataset names to URLs if possible
+                        known_mappings = {
+                            'librispeech': 'https://huggingface.co/datasets/librispeech_asr',
+                            'common_voice': 'https://huggingface.co/datasets/common_voice',
+                            'squad': 'https://huggingface.co/datasets/squad',
+                            'glue': 'https://huggingface.co/datasets/glue',
+                        }
+                        for dataset_name in extracted_metadata.training_datasets:
+                            mapping_key = dataset_name.lower().replace('-', '_')
+                            if mapping_key in known_mappings:
+                                dataset_urls.append(known_mappings[mapping_key])
+
+                    # Get code URLs
+                    code_urls = extracted_metadata.code_urls or []
+
+            except Exception as e:
+                pass  # Silently continue if LLM inference fails
+
+        result = run_metrics(
+            model_url=model_url,
+            dataset_urls=dataset_urls,
+            code_urls=code_urls
+        )
         print(result)
         return 0
     except Exception as e:
@@ -250,7 +366,15 @@ def run_metrics(model_url: str, dataset_urls: List[str] = None, code_urls: List[
             }
 
         # Extract model_id from URL for metrics that need it
-        model_id = model_url.split("/")[-1] if model_url else ""
+        # For HuggingFace URLs, we need org/model format, not just the model name
+        if model_url and "huggingface.co" in model_url:
+            parts = model_url.rstrip("/").split("/")
+            if len(parts) >= 2:
+                model_id = "/".join(parts[-2:])  # Get org/model
+            else:
+                model_id = parts[-1] if parts else ""
+        else:
+            model_id = model_url.split("/")[-1] if model_url else ""
 
         # Create resource bundle
         resource_bundle = ResourceBundle(

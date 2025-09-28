@@ -34,6 +34,7 @@ except ImportError:
         return "UNKNOWN"
 
 
+
 @register("code_quality")
 class CodeQualityMetric(BaseMetric):
     """
@@ -63,11 +64,15 @@ class CodeQualityMetric(BaseMetric):
         Evaluate code quality and maintainability of associated repositories.
         Clones repositories locally and performs comprehensive analysis.
         """
-        if not resource.code_urls:
-            return 0.0  # No code repositories to analyze
+        code_urls = resource.code_urls
+
+        # LLM inference is now handled by the orchestrator - URLs are pre-populated in ResourceBundle
+
+        if not code_urls:
+            return 0.1  # Give small score instead of 0 - model might have implicit code
 
         # Filter for GitHub repositories only
-        github_repos = [url for url in resource.code_urls if categorize_url(url) == "CODE"]
+        github_repos = [url for url in code_urls if categorize_url(url) == "CODE"]
         if not github_repos:
             return 0.0
 
@@ -97,14 +102,16 @@ class CodeQualityMetric(BaseMetric):
     
     def _get_computation_notes(self, resource: ResourceBundle) -> str:
         if not resource.code_urls:
-            return f"No code repositories found for {resource.model_url}. Quality assessment not possible."
+            return f"No code repositories found for {resource.model_url}. Quality assessment limited to baseline score."
 
-        github_repos = [url for url in resource.code_urls if categorize_url(url) == "CODE"]
+        code_urls = resource.code_urls
+
+        github_repos = [url for url in code_urls if categorize_url(url) == "CODE"]
         if not github_repos:
-            return f"No GitHub repositories found in {len(resource.code_urls)} code URLs. Only GitHub repositories are analyzed."
+            return f"No GitHub repositories found in {len(code_urls)} code URLs. Only GitHub repositories are analyzed."
 
         return (
-            f"Analyzed {min(len(github_repos), 3)} GitHub repositories for {resource.model_url}. "
+            f"Analyzed {min(len(github_repos), 3)} GitHub repositories for {resource.model_url}{inferred_note}. "
             f"Assessment based on repository structure, documentation, testing infrastructure, and code organization."
         )
 

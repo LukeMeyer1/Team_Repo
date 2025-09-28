@@ -117,7 +117,7 @@ class SizeScoreMetric(BaseMetric):
         if not _HF_CLIENT_AVAILABLE:
             return 0.0  # Cannot analyze without HuggingFace client
 
-        model_size_mb = self._fetch_model_size(resource.model_url)
+        model_size_mb = self._fetch_model_size(resource)
         if model_size_mb is None:
             return 0.0
 
@@ -128,17 +128,17 @@ class SizeScoreMetric(BaseMetric):
         if not _HF_CLIENT_AVAILABLE:
             return f"HuggingFace client not available. Cannot analyze model size for {resource.model_url}."
 
-        model_size_mb = self._fetch_model_size(resource.model_url)
+        model_size_mb = self._fetch_model_size(resource)
         if model_size_mb is not None:
             return f"Model size: {model_size_mb:.1f}MB. Device compatibility computed from downloaded model weight files."
         return f"Could not fetch model size from {resource.model_url}. Score set to 0.0 (unevaluable)."
 
-    def _fetch_model_size(self, model_url: str) -> Optional[float]:
+    def _fetch_model_size(self, resource: ResourceBundle) -> Optional[float]:
         """
         Fetch total weight file size (in MB) by downloading the model locally.
 
         Strategy:
-          - Extract model ID from URL
+          - Use provided model_id or extract from URL
           - Download model using HuggingFace client
           - Calculate size of weight files only
           - Clean up downloaded files
@@ -147,7 +147,8 @@ class SizeScoreMetric(BaseMetric):
             return None
 
         try:
-            model_id = _extract_model_id_from_url(model_url)
+            # Use provided model_id if available, otherwise extract from URL
+            model_id = resource.model_id if resource.model_id else _extract_model_id_from_url(resource.model_url)
             if not model_id:
                 return None
 

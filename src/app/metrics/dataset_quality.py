@@ -12,6 +12,7 @@ try:
 except ImportError:
     hf_client = None
 
+
 @register("dataset_quality")
 class DatasetQualityMetric(BaseMetric):
     """
@@ -54,18 +55,22 @@ class DatasetQualityMetric(BaseMetric):
         Returns:
             Score from 0-1 where 1 = high-quality, well-documented, widely-used datasets
         """
-        if not resource.dataset_urls:
-            return 0.0
+        dataset_urls = resource.dataset_urls
+
+        # LLM inference is now handled by the orchestrator - URLs are pre-populated in ResourceBundle
+
+        if not dataset_urls:
+            return 0.1  # Give small score instead of 0 - model might have implicit datasets
 
         if not hf_client:
-            return 0.1  # Minimal score if HF client unavailable
+            return 0.2  # Minimal score if HF client unavailable but we have URLs
 
         total_score = 0.0
         analyzed_datasets = 0
         dataset_details = []
 
         # Analyze each dataset (limit to first 5 to avoid excessive processing)
-        for dataset_url in resource.dataset_urls[:5]:
+        for dataset_url in dataset_urls[:5]:
             try:
                 dataset_id = self._extract_dataset_id(dataset_url)
                 if not dataset_id:
@@ -101,8 +106,9 @@ class DatasetQualityMetric(BaseMetric):
         return min(1.0, average_score + diversity_bonus)
 
     def _get_computation_notes(self, resource: ResourceBundle) -> str:
+        # Check if we inferred datasets
         if not resource.dataset_urls:
-            return f"No datasets found for {resource.model_url}. Quality assessment not possible."
+            return f"No datasets found for {resource.model_url}. Quality assessment limited to baseline score."
 
         if not hf_client:
             return "HuggingFace client unavailable. Cannot analyze dataset quality."
@@ -116,7 +122,7 @@ class DatasetQualityMetric(BaseMetric):
         avg_score = details.get('average_score', 0.0)
 
         notes = [
-            f"Analyzed {analyzed}/{total} datasets for {resource.model_url}.",
+            f"Analyzed {analyzed}/{total} datasets for {resource.model_url}{inferred_note}.",
             f"Average dataset quality score: {avg_score:.2f}"
         ]
 

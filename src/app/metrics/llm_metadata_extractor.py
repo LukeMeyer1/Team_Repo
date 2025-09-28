@@ -97,10 +97,26 @@ class LLMMetadataExtractor:
             text_parts.append("=== README ===\n" + readme)
 
         # Add structured card data
-        if card_data and not isinstance(card_data, dict) or 'error' not in card_data:
-            if isinstance(card_data, dict):
-                formatted_card = json.dumps(card_data, indent=2)
+        if card_data and isinstance(card_data, dict) and 'error' not in card_data:
+            try:
+                # Filter out non-serializable objects and create a clean dict
+                clean_card_data = {}
+                for key, value in card_data.items():
+                    try:
+                        # Test if the value is JSON serializable
+                        json.dumps(value)
+                        clean_card_data[key] = value
+                    except (TypeError, ValueError):
+                        # Convert non-serializable to string
+                        clean_card_data[key] = str(value)
+
+                formatted_card = json.dumps(clean_card_data, indent=2)
                 text_parts.append("=== MODEL CARD DATA ===\n" + formatted_card)
+            except Exception:
+                # If all else fails, just add key information as text
+                card_text = "\n".join([f"{k}: {str(v)}" for k, v in card_data.items() if v is not None])
+                if card_text:
+                    text_parts.append("=== MODEL CARD DATA ===\n" + card_text)
 
         # Add basic model info
         if 'model_info' in model_info:
@@ -124,7 +140,7 @@ You are an expert at analyzing machine learning model documentation. Extract the
 
 {
   "dataset_urls": ["list of any HuggingFace dataset URLs mentioned"],
-  "code_urls": ["list of any GitHub/GitLab repository URLs mentioned"],
+  "code_urls": ["list of any GitHub/GitLab/code repository URLs mentioned"],
   "training_datasets": ["list of dataset names used for training"],
   "evaluation_datasets": ["list of dataset names used for evaluation/benchmarking"],
   "paper_urls": ["list of any research paper URLs mentioned"],
@@ -137,11 +153,18 @@ You are an expert at analyzing machine learning model documentation. Extract the
 }
 
 Guidelines:
-- Only include URLs that are explicitly mentioned in the text
+- Look for ANY code repository URLs including GitHub, GitLab, Bitbucket, etc.
+- Also look for repository references like "see our code at", "implementation available", "source code"
+- For model families like BERT, Whisper, etc., try to infer the canonical repository if not explicitly mentioned:
+  - BERT models → https://github.com/google-research/bert
+  - Whisper models → https://github.com/openai/whisper
+  - GPT models → https://github.com/openai/gpt-2 or similar
+  - BART models → https://github.com/pytorch/fairseq
+- Include both exact URLs and inferred canonical repositories
 - For dataset names, include both formal names (e.g., "GLUE") and HuggingFace dataset IDs
 - Set confidence_score based on how much relevant information you found (0.0-1.0)
 - Use null for fields where no information is available
-- Be conservative - only include information you're confident about
+- Be slightly more liberal with inference for well-known model families
 
 Return ONLY the JSON object, no additional text.
 """
@@ -179,21 +202,59 @@ Return ONLY the JSON object, no additional text.
     def _extract_with_regex(self, text: str, model_id: str) -> ExtractedMetadata:
         """Use regex patterns to extract basic information from text."""
 
-        # URL patterns
+        # URL patterns (expanded for more code repositories)
         github_pattern = r'https?://github\.com/[^\s\)\]<>"]+'
+        gitlab_pattern = r'https?://gitlab\.com/[^\s\)\]<>"]+'
+        bitbucket_pattern = r'https?://bitbucket\.org/[^\s\)\]<>"]+'
         hf_dataset_pattern = r'https?://huggingface\.co/datasets/[^\s\)\]<>"]+'
         paper_pattern = r'https?://(?:arxiv\.org|aclanthology\.org|papers\.nips\.cc)[^\s\)\]<>"]+'
 
-        # Dataset name patterns
-        dataset_name_pattern = r'\b(?:GLUE|SQuAD|CoLA|SST-2|MRPC|QQP|MNLI|QNLI|RTE|WNLI|ImageNet|COCO|WikiText|Common Crawl|BookCorpus|OpenWebText)\b'
+        # Extended dataset name patterns (include audio datasets for Whisper, etc.)
+        dataset_name_pattern = r'\b(?:GLUE|SQuAD|CoLA|SST-2|MRPC|QQP|MNLI|QNLI|RTE|WNLI|ImageNet|COCO|WikiText|Common Crawl|BookCorpus|OpenWebText|LibriSpeech|CommonVoice|VoxCeleb|TIMIT|LJSpeech|VCTK)\b'
 
         # Extract URLs
         dataset_urls = re.findall(hf_dataset_pattern, text, re.IGNORECASE)
         code_urls = re.findall(github_pattern, text, re.IGNORECASE)
+        code_urls.extend(re.findall(gitlab_pattern, text, re.IGNORECASE))
+        code_urls.extend(re.findall(bitbucket_pattern, text, re.IGNORECASE))
         paper_urls = re.findall(paper_pattern, text, re.IGNORECASE)
+
+        # Infer canonical repositories based on model family if no code URLs found
+        if not code_urls and model_id:
+            canonical_repo = self._infer_canonical_repository(model_id)
+            if canonical_repo:
+                code_urls.append(canonical_repo)
 
         # Extract dataset names
         dataset_names = re.findall(dataset_name_pattern, text, re.IGNORECASE)
+
+        # Also check for common dataset references in structured data (like eval_results)
+        # Look for dataset type/name patterns in the text
+        eval_dataset_pattern = r'dataset[_\s]*(?:type|name)[^:]*:\s*["\']?([^"\'\\s,}\]]+)'
+        eval_matches = re.findall(eval_dataset_pattern, text, re.IGNORECASE)
+        for match in eval_matches:
+            if match and match.lower() not in [d.lower() for d in dataset_names]:
+                dataset_names.append(match)
+
+        # Convert well-known dataset names to HuggingFace URLs when possible
+        known_dataset_mappings = {
+            'librispeech_asr': 'https://huggingface.co/datasets/librispeech_asr',
+            'librispeech': 'https://huggingface.co/datasets/librispeech_asr',
+            'common_voice': 'https://huggingface.co/datasets/common_voice',
+            'squad': 'https://huggingface.co/datasets/squad',
+            'glue': 'https://huggingface.co/datasets/glue',
+            'bookcorpus': 'https://huggingface.co/datasets/bookcorpus',
+            'imagenet': 'https://huggingface.co/datasets/imagenet-1k',
+            'coco': 'https://huggingface.co/datasets/coco',
+            'wikitext': 'https://huggingface.co/datasets/wikitext'
+        }
+
+        for dataset_name in dataset_names:
+            mapping_key = dataset_name.lower().replace('-', '_')
+            if mapping_key in known_dataset_mappings:
+                url = known_dataset_mappings[mapping_key]
+                if url not in dataset_urls:
+                    dataset_urls.append(url)
 
         # Simple license detection
         license_info = None
@@ -209,7 +270,7 @@ Return ONLY the JSON object, no additional text.
                 break
 
         # Calculate confidence based on how much we found
-        found_items = len(dataset_urls) + len(code_urls) + len(paper_urls) + len(dataset_names)
+        found_items = len(dataset_urls) + len(code_urls) + len(paper_urls) + len(dataset_names or [])
         confidence_score = min(0.8, found_items * 0.2)  # Cap at 0.8 for regex-based extraction
 
         return ExtractedMetadata(
@@ -225,6 +286,41 @@ Return ONLY the JSON object, no additional text.
             limitations=[],
             confidence_score=confidence_score
         )
+
+    def _infer_canonical_repository(self, model_id: str) -> Optional[str]:
+        """Infer canonical code repository based on model family."""
+        if not model_id:
+            return None
+
+        model_id_lower = model_id.lower()
+
+        # Common model family mappings to their canonical repositories
+        canonical_mappings = {
+            'bert': 'https://github.com/google-research/bert',
+            'whisper': 'https://github.com/openai/whisper',
+            'gpt': 'https://github.com/openai/gpt-2',
+            'bart': 'https://github.com/pytorch/fairseq',
+            'roberta': 'https://github.com/pytorch/fairseq',
+            't5': 'https://github.com/google-research/text-to-text-transfer-transformer',
+            'distilbert': 'https://github.com/huggingface/transformers',
+            'electra': 'https://github.com/google-research/electra',
+            'deberta': 'https://github.com/microsoft/DeBERTa',
+            'llama': 'https://github.com/facebookresearch/llama',
+            'mistral': 'https://github.com/mistralai/mistral-src',
+            'phi': 'https://github.com/microsoft/phi-3',
+            'falcon': 'https://github.com/Stability-AI/StableLM',
+            'opt': 'https://github.com/pytorch/fairseq',
+            'bloom': 'https://github.com/bigscience-workshop/bigscience',
+            'alpaca': 'https://github.com/tatsu-lab/stanford_alpaca',
+            'vicuna': 'https://github.com/lm-sys/FastChat',
+        }
+
+        # Check if model_id contains any of the known families
+        for family, repo in canonical_mappings.items():
+            if family in model_id_lower:
+                return repo
+
+        return None
 
     def _empty_metadata(self, reason: str) -> ExtractedMetadata:
         """Return empty metadata structure with error information."""
