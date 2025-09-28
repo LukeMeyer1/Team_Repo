@@ -2,7 +2,7 @@
 Utilities for parsing Hugging Face model URLs and fetching metadata.
 
 This module centralizes URL parsing and API requests so metric implementations
-don’t need to duplicate boilerplate logic.
+don't need to duplicate boilerplate logic.
 """
 
 import requests

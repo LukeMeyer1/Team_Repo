@@ -18,7 +18,7 @@ class LicenseMetric(BaseMetric):
         readme = data.get("cardData", {}).get("README", "").lower()
 
         # LGPLv2.1 is required
-        if "lgpl-2.1" in license_tag or "lgpl v2.1" in readme:
+        if re.search(r"(lgpl[-_\s]?2\.1|apache-2\.0|mit|bsd)", license_tag):
             return 1.0
         elif license_tag in ["mit", "apache-2.0", "bsd-3-clause"]:
             return 0.7
