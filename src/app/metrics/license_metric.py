@@ -10,7 +10,7 @@ class LicenseMetric(BaseMetric):
     name = "license"
 
     def _compute_score(self, resource: ResourceBundle) -> float:
-        r = requests.get(HF_API_MODEL.format(repo_id=resource.model_id), timeout=10)
+        r = requests.get(HF_API_MODEL.format(model_id=resource.model_id), timeout=10)
         r.raise_for_status()
         data = r.json()
 

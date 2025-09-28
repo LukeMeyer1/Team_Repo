@@ -3,27 +3,39 @@ from datetime import datetime, timedelta
 from .base_metric import BaseMetric
 from .base import ResourceBundle
 from .registry import register
-from ..Url_Parser.Url_Parser import *
+
+# Import HuggingFace client
+try:
+    from app.integrations.huggingface_client import hf_client
+    _HF_CLIENT_AVAILABLE = True
+except ImportError:
+    _HF_CLIENT_AVAILABLE = False
+    hf_client = None
 
 @register("performance_claims")
 class PerformanceClaimsMetric(BaseMetric):
     name = "performance_claims"
 
     def _compute_score(self, resource: ResourceBundle) -> float:
-        r = requests.get(HF_API_MODEL.format(repo_id=resource.model_id), timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        readme = data.get("cardData", {}).get("README", "").lower()
+        if not _HF_CLIENT_AVAILABLE or not hf_client:
+            return 0.2
+
+        # Get README content using HuggingFace client
+        readme = hf_client.get_model_readme(resource.model_id)
+        if not readme:
+            return 0.2
+
+        readme_lower = readme.lower()
 
         # Look for evaluation metrics
         metrics = ["bleu", "f1", "accuracy", "rouge", "perplexity", "cer", "wer"]
-        found = sum(1 for m in metrics if m in readme)
+        found = sum(1 for m in metrics if m in readme_lower)
 
         # Look for benchmark tables
-        has_table = " | " in readme and "---" in readme  # crude Markdown table check
+        has_table = " | " in readme_lower and "---" in readme_lower  # crude Markdown table check
 
         # Look for citations/links
-        has_citation = bool(re.search(r"(arxiv\.org|paperswithcode\.com|huggingface\.co/evaluate)", readme))
+        has_citation = bool(re.search(r"(arxiv\.org|paperswithcode\.com|huggingface\.co/evaluate)", readme_lower))
 
         # Scoring
         score = 0.2

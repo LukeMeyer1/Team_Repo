@@ -86,6 +86,7 @@ class BaseMetric(ABC):
             # TODO: Add proper error handling and logging
             # For now, fall back to placeholder to avoid breaking tests
             score = stable_01(resource.model_url, self.name)
+            print("AAAHHHH we had to use the placeholder. " + e)
             notes = f"Error in computation, using placeholder: {str(e)}"
         
         latency_ms = int((perf_counter_ns() - t0) / 1_000_000)
