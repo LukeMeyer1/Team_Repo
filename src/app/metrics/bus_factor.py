@@ -48,17 +48,19 @@ class BusFactorMetric(BaseMetric):
 
         # Score formula
         score = 0.2
-        if num_contributors > 5:
-            score += 0.4
-        elif num_contributors > 1:
-            score += 0.2
+        if num_contributors >= 5:
+            score += 0.5
+        elif num_contributors >= 3:
+            score += 0.3
+        elif num_contributors >= 1:
+            score += 0.1
 
-        if recency_days < 30:
+        if recency_days < 730:
             score += 0.4
-        elif recency_days < 180:
+        elif recency_days < 1460:
             score += 0.2
 
         if org:
             score += 0.1
 
-        return min(score, 1.0)
+        return round(min(score, 1.0), 1)
