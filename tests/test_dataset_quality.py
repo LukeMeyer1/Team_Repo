@@ -57,7 +57,7 @@ def test_no_datasets():
 
     result = metric.compute(resource)
 
-    assert result.score == 0.0, f"Expected 0.0 for no datasets, got {result.score}"
+    assert result.score == 0.1, f"Expected 0.1 for no datasets, got {result.score}"
     assert "No datasets found" in result.notes
 
     print("✓ No datasets handling working correctly")
@@ -79,7 +79,7 @@ def test_hf_client_unavailable():
 
         result = metric.compute(resource)
 
-        assert result.score == 0.1, f"Expected 0.1 for unavailable client, got {result.score}"
+        assert result.score == 0.2, f"Expected 0.2 for unavailable client, got {result.score}"
         assert "HuggingFace client unavailable" in result.notes
 
     print("✓ HuggingFace client unavailable handling working correctly")

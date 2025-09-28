@@ -74,7 +74,7 @@ class CodeQualityMetric(BaseMetric):
         # Filter for GitHub repositories only
         github_repos = [url for url in code_urls if categorize_url(url) == "CODE"]
         if not github_repos:
-            return 0.0
+            return 0.1  # Give small score even for non-GitHub code URLs
 
         total_score = 0.0
         analyzed_repos = 0
@@ -90,7 +90,7 @@ class CodeQualityMetric(BaseMetric):
                 continue  # Skip failed repositories
 
         if analyzed_repos == 0:
-            return 0.0
+            return 0.1  # Give baseline score even if analysis fails
 
         # Average score across analyzed repositories
         average_score = total_score / analyzed_repos
@@ -111,7 +111,7 @@ class CodeQualityMetric(BaseMetric):
             return f"No GitHub repositories found in {len(code_urls)} code URLs. Only GitHub repositories are analyzed."
 
         return (
-            f"Analyzed {min(len(github_repos), 3)} GitHub repositories for {resource.model_url}{inferred_note}. "
+            f"Analyzed {min(len(github_repos), 3)} GitHub repositories for {resource.model_url}. "
             f"Assessment based on repository structure, documentation, testing infrastructure, and code organization."
         )
 

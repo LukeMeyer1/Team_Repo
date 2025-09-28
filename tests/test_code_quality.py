@@ -60,7 +60,7 @@ def test_no_code_repositories():
 
     result = metric.compute(resource)
 
-    assert result.score == 0.0, f"Expected 0.0 for no repositories, got {result.score}"
+    assert result.score == 0.1, f"Expected 0.1 for no repositories, got {result.score}"
     assert "No code repositories found" in result.notes
 
     print("✓ No code repositories handling working correctly")

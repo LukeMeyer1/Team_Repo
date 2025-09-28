@@ -122,7 +122,7 @@ class DatasetQualityMetric(BaseMetric):
         avg_score = details.get('average_score', 0.0)
 
         notes = [
-            f"Analyzed {analyzed}/{total} datasets for {resource.model_url}{inferred_note}.",
+            f"Analyzed {analyzed}/{total} datasets for {resource.model_url}.",
             f"Average dataset quality score: {avg_score:.2f}"
         ]
 

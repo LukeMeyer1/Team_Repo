@@ -172,8 +172,14 @@ def test_fetch_model_size_success(mock_hf_client):
 
     with patch('app.metrics.size.Path', return_value=mock_path):
         with patch('shutil.rmtree'):  # Mock shutil.rmtree directly
+            from app.metrics.base import ResourceBundle
             metric = SizeScoreMetric()
-            size = metric._fetch_model_size("https://huggingface.co/bert-base-uncased")
+            resource = ResourceBundle(
+                model_url="https://huggingface.co/bert-base-uncased",
+                dataset_urls=[],
+                code_urls=[]
+            )
+            size = metric._fetch_model_size(resource)
 
     assert size == 100.0, f"Expected 100.0 MB, got {size}"
     mock_hf_client.download_model.assert_called_once()
