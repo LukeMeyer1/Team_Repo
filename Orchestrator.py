@@ -1,12 +1,12 @@
-import time
 import sys
 import os
-import Url_Parser
 import Installer
 import Tester
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, List
 import json
+from Logger import get_logger
+logger = get_logger("Orchestrator")
 
 # Suppress HuggingFace symlink warning on Windows
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
@@ -25,10 +25,12 @@ except ImportError:
     pass
 
 def install_dependencies() -> int:
+    logger.info("Installing dependencies...")
     return Installer.run()
     
 
 def run_tests(pytest_args=None) -> int:
+    logger.info("Running tests...")
     import sys, json
     from pathlib import Path
 
@@ -86,6 +88,7 @@ def run_tests(pytest_args=None) -> int:
 
 
 def process_urls(file_path: Path) -> int:
+    logger.info(f"Processing URLs from file: {file_path}")
     # Add src to path for imports
     import sys
     from pathlib import Path
@@ -125,6 +128,7 @@ def process_url_group(url_group: str, dataset_tracker=None) -> int:
     Returns:
         0 on success, non-zero on error
     """
+    logger.info(f"Processing URL group: {url_group}")
     try:
         # Parse CSV format: code_link, dataset_link, model_link
         parts = url_group.split(',')
@@ -184,6 +188,7 @@ def process_url(url: str) -> int:
     Returns:
         0 on success, non-zero on error
     """
+    logger.info(f"Processing single URL: {url}")
     try:
         result = run_metrics(model_url=url)
         print(result)
@@ -207,6 +212,7 @@ def run_metrics(model_url: str, dataset_urls: List[str] = None, code_urls: List[
     Returns:
         NDJSON string with metric results
     """
+    logger.info(f"Running metrics for model URL: {model_url}")
     # Add src to path for imports
     import sys
     from pathlib import Path
