@@ -18,7 +18,7 @@ kwargs = dict(
 if log_file:
     kwargs.update(filename=log_file, filemode="r+")   # don't create new files
 
-# logging.basicConfig(**kwargs)
+logging.basicConfig(**kwargs)
 
 def get_logger(name: str):
     """
