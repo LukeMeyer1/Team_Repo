@@ -1,4 +1,5 @@
 import re
+import requests
 from datetime import datetime, timedelta
 from .base_metric import BaseMetric
 from .base import ResourceBundle
@@ -10,7 +11,8 @@ class LicenseMetric(BaseMetric):
     name = "license"
 
     def _compute_score(self, resource: ResourceBundle) -> float:
-        r = requests.get(HF_API_MODEL.format(repo_id=resource.model_id), timeout=10)
+        model_id = parse_model_id(resource.model_url)
+        r = requests.get(HF_API_MODEL.format(model_id=model_id), timeout=10)
         r.raise_for_status()
         data = r.json()
 
