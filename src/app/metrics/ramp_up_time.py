@@ -43,7 +43,7 @@ class RampUpTimeMetric(BaseMetric):
             except Exception:
                 readme = ""
 
-        if "usage" in readme or "example" in readme:
+        if "usage" in readme or "example" in readme or "how to use" in readme:
             score = 0.6
             if "```" in readme:  # presence of code block
                 score += 0.3
