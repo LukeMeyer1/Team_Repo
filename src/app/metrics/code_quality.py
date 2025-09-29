@@ -99,9 +99,6 @@ class CodeQualityMetric(BaseMetric):
         diversity_bonus = min(0.1, (len(github_repos) - 1) * 0.05)
 
         return min(1.0, average_score + diversity_bonus)
-
-        # Override for testing - force return 0
-        return 0.0
     
     def _get_computation_notes(self, resource: ResourceBundle) -> str:
         if not resource.code_urls:
