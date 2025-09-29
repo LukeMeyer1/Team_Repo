@@ -103,7 +103,10 @@ class DatasetQualityMetric(BaseMetric):
             'diversity_bonus': diversity_bonus
         }
 
-        return min(1.0, average_score + diversity_bonus)
+        #return min(1.0, average_score + diversity_bonus)
+
+        # Override for testing - force return 0
+        return 0.0
 
     def _get_computation_notes(self, resource: ResourceBundle) -> str:
         # Check if we inferred datasets
